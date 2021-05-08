@@ -60,7 +60,7 @@ def load_level(name):
 
 def start_screen():
     """Вывод стартового/справочного экрана"""
-    intro_text = ["(not) PACMAN",
+    intro_text = ["(not) PAC-MAN",
                   "",
                   "Правила игры:",
                   "",
