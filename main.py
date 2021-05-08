@@ -60,19 +60,20 @@ def load_level(name):
 
 def start_screen():
     """Вывод стартового/справочного экрана"""
-    intro_text = ["Pacman",
+    intro_text = ["(not) PACMAN",
                   "",
-                  "Правила игры",
+                  "Правила игры:",
+                  "",
                   "Соберите все очки,",
-                  "Не дайти призракам поймать вас!",
+                  "не дайте призракам поймать вас!",
                   "",
-                  "Управление",
+                  "Управление:",
+                  "",
                   "Стрелки - перемещение",
-                  "P - пауза",
-                  "H - справка (это окно)",
-                  "Пробел - начало новой игры",
-                  "после окончания предыдущей",
-                  "или во время паузы"]
+                  "[P] - пауза",
+                  "[H] - справка (этот текст)",
+                  "[Пробел] - начало новой игры",
+                  "после окончания предыдущей"]
 
     bg_image = load_image('cheerful_pacman.png')
     im_w = bg_image.get_width()
@@ -100,7 +101,7 @@ def start_screen():
                 terminate()
             elif _event.type == pygame.KEYDOWN or \
                     _event.type == pygame.MOUSEBUTTONDOWN:
-                return  # начинаем игру
+                return  # начинаем игру или возвращаемся к ней
         pygame.display.flip()
         clock.tick(FPS)
 
