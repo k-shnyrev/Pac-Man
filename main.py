@@ -1,6 +1,6 @@
 import os
 import sys
-from random import sample
+from random import sample, choice
 
 import pygame
 
@@ -10,8 +10,10 @@ UPDATE_HERO_EVENT = pygame.USEREVENT + 1
 MOVE_ENEMY_EVENT = pygame.USEREVENT + 2
 FONT_SIZE = 30
 FREE_TILE = '.'
+EMPTY_TILE = ' '
 WALL_TILE = '#'
 HERO_TILE = '@'
+GHOST_TILE = '!'
 TOP = 30  # дополнительные поля сверху
 MOVES = UP, DOWN, LEFT, RIGHT = (0, -1), (0, 1), (-1, 0), (1, 0)
 ENEMY_DELAY = 500  # задержка врагов, мс
@@ -22,6 +24,8 @@ DIRECTIONS = {
     'LEFT': 180,
     'DOWN': 270
 }
+LEVELS = ['level1', 'level2', 'level3']
+# имена файлов с уровнями, добавьте сюда свой
 
 
 def load_image(name, color_key=None):
@@ -47,19 +51,28 @@ def load_level(name):
     name = os.path.join('data', name)
     # читаем уровень, убирая символы перевода строки
     with open(name) as map_file:
-        level_map = [line.strip() for line in map_file]
+        level_map = [line.rstrip('\n') for line in map_file]
     # и подсчитываем максимальную длину
     max_width = max(map(len, level_map))
     # дополняем каждую строку пустыми клетками (' ')
-    return list(map(lambda x: x.ljust(max_width, ' '), level_map))
+    return list(map(lambda x: x.ljust(max_width, EMPTY_TILE), level_map))
 
 
 def start_screen():
-    """Вывод стартового экрана"""
-    intro_text = ["ЗАСТАВКА", "",
+    """Вывод стартового/справочного экрана"""
+    intro_text = ["Pacman",
+                  "",
                   "Правила игры",
-                  "Если в правилах несколько строк,",
-                  "приходится выводить их построчно"]
+                  "Соберите все очки,",
+                  "Не дайти призракам поймать вас!",
+                  "",
+                  "Управление",
+                  "Стрелки - перемещение",
+                  "P - пауза",
+                  "H - справка (это окно)",
+                  "Пробел - начало новой игры",
+                  "после окончания предыдущей",
+                  "или во время паузы"]
 
     bg_image = load_image('cheerful_pacman.png')
     im_w = bg_image.get_width()
@@ -93,11 +106,13 @@ def start_screen():
 
 
 def terminate():
+    """Окончание работы программы"""
     pygame.quit()
     sys.exit()
 
 
 def game_over(won=False):
+    """Завершение программы (won - выигрыш)"""
     pygame.time.set_timer(MOVE_ENEMY_EVENT, 0)
     pygame.time.set_timer(UPDATE_HERO_EVENT, 0)
     if won:
@@ -107,11 +122,13 @@ def game_over(won=False):
 
 
 class Level:
+    """Класс для работы с игровым уровнем"""
     def __init__(self, _level):
         self.width, self.height = None, None
         self.start = None
         self.map = _level
         self.walls = []
+        self.dangerous = []  # список точек, куда могут попасть призраки
         self.free = []
         self.points = []
         self.height = len(self.map)
@@ -123,13 +140,21 @@ class Level:
                 elif self.map[y][x] == HERO_TILE:
                     self.start = x, y
                 elif self.map[y][x] == FREE_TILE:
-                    self.set_tile_free(x, y)
                     self.points.append((x, y))
+                elif self.map[y][x] == GHOST_TILE:
+                    self.dangerous.append((x, y))
         if self.start is None:
             self.start = self.get_free_tiles(1)[0]
             self.points.remove(self.start)
+        if len(self.dangerous) < 3:
+            exists = len(self.dangerous)
+            new_places = sample(self.points, 3 - exists)
+            for p in new_places:
+                self.points.remove(p)
+                self.dangerous.append(p)
 
     def shutter_point(self, x, y):
+        """Уничтожение точки ("съедание" Пакманом)"""
         if (x, y) in self.points:
             self.points.remove((x, y))
             return True
@@ -140,19 +165,17 @@ class Level:
             return None
         return self.map[y][x]
 
-    def set_tile_free(self, x, y):
-        self.free.append((x, y))
-
     def get_free_tiles(self, k=1):
-        coords = sample(self.free, k)
-        while self.start in coords:
-            coords = sample(self.free, k)
+        """Получение k случайных свободных точек"""
+        coords = sample(self.points, k)
         return coords
 
     def is_free(self, x, y):
-        return (x, y) in self.free
+        tile = self.get_tile(x, y)
+        return tile in (FREE_TILE, EMPTY_TILE, HERO_TILE, GHOST_TILE)
 
     def find_path_step(self, start, target):
+        """Алгоритм поиска первого шага кратчайшего пути"""
         x, y = start
         inf = self.width * self.height
         distance = [[inf] * self.width for _ in range(self.height)]
@@ -177,6 +200,7 @@ class Level:
 
 
 class Entity(pygame.sprite.Sprite):
+    """Сущности на игровой карте"""
     def __init__(self, coords, margins, cell_size, *groups):
         super(Entity, self).__init__(*groups)
         self.coords = coords
@@ -191,6 +215,7 @@ class Entity(pygame.sprite.Sprite):
 
 
 class Person(Entity):
+    """Персонажи (Пакман и призраки)"""
     def __init__(self, image, coords, margins, cell_size, *groups):
         self.image = pygame.transform.scale(load_image(image),
                                             (cell_size, cell_size))
@@ -204,6 +229,7 @@ class Person(Entity):
 
 
 class Hero(Person):
+    """Пакман"""
     def __init__(self, coords, margins, cell_size, *groups):
         super(Hero, self).__init__('pacman.png', coords, margins, cell_size,
                                    *groups)
@@ -219,10 +245,12 @@ class Hero(Person):
 
 
 class Ghost(Person):
+    """Призраки"""
     pass
 
 
 class Wall(Entity):
+    """Стена на карте"""
     def __init__(self, coords, margins, cell_size, *groups):
         self.image = pygame.transform.scale(load_image('box.png'),
                                             (cell_size, cell_size))
@@ -230,6 +258,7 @@ class Wall(Entity):
 
 
 class Point(Entity):
+    """Точка, приносящая очки при "съедании" Пакманом"""
     def __init__(self, coords, margins, cell_size, *groups):
         self.image = pygame.transform.scale(load_image('point.png'),
                                             (cell_size, cell_size))
@@ -237,7 +266,8 @@ class Point(Entity):
 
 
 class Game:
-    def __init__(self, size, level_file_name):
+    """Основной класс с игровой логикой"""
+    def __init__(self, size):
         self.level = None
         self.cell_size = 0, 0
         self.margins = 0, 0
@@ -246,21 +276,28 @@ class Game:
         self.enemies = []
         self.points = {}
         self.score = 0
-        self.new(size, level_file_name)
+        self.level_file_name = None
+        self.new(size)
 
-    def new(self, size, level_file_name):
-        self.level = Level(load_level(level_file_name))
+    def new(self, size):
+        new_level_file_name = choice(LEVELS)
+        while new_level_file_name == self.level_file_name:
+            new_level_file_name = choice(LEVELS)
+        self.level_file_name = new_level_file_name
+        self.level = Level(load_level(self.level_file_name))
         self.cell_size = min((HEIGHT - TOP) // self.level.height,
                              WIDTH // self.level.width)
         w = self.level.width * self.cell_size
         h = self.level.height * self.cell_size
         self.margins = (size[0] - w) // 2, TOP + (size[1] - TOP - h) // 2
+        self.walls.clear()
         for wall_c in self.level.walls:
             self.walls.append(Wall(wall_c, self.margins, self.cell_size,
                                    all_sprites, walls))
         self.hero = Hero(self.level.start, self.margins, self.cell_size,
                          all_sprites)
-        ghosts_coords = self.level.get_free_tiles(3)
+        ghosts_coords = self.level.dangerous
+        self.points.clear()
         for coords in self.level.points:
             self.points[coords] = Point(coords, self.margins, self.cell_size,
                                         all_sprites, points)
@@ -271,6 +308,7 @@ class Game:
         yellow_ghost = Ghost('yellow_ghost.png', ghosts_coords[2],
                              self.margins, self.cell_size, all_sprites, ghosts)
         self.enemies = [green_ghost, red_ghost, yellow_ghost]
+        self.score = 0
 
     def update_hero(self):
         next_x, next_y = self.hero.get_position()
@@ -294,8 +332,6 @@ class Game:
                 self.score += 1
                 self.points[(next_x, next_y)].kill()
                 self.points.pop((next_x, next_y))
-        if len(self.points) == 0:
-            game_over()
 
     def move_enemy(self, enemy):
         others = [en.get_position() for en in self.enemies]
@@ -311,12 +347,14 @@ class Game:
 
 
 def show_text(_screen, pos, text, color=(255, 255, 255), size=FONT_SIZE):
+    """Отрисовка текста на _screen"""
     font = pygame.font.Font(None, size)
     text = font.render(text, True, color)
     _screen.blit(text, pos)
 
 
 def show_message(_screen, message, color=(255, 255, 255), size=FONT_SIZE * 3):
+    """Показ сообщения в центре _screen"""
     font = pygame.font.Font(None, size)
     text = font.render(message, True, color)
     text_x = WIDTH // 2 - text.get_width() // 2
@@ -325,6 +363,39 @@ def show_message(_screen, message, color=(255, 255, 255), size=FONT_SIZE * 3):
     pygame.draw.rect(_screen, pygame.Color(0, 0, 0),
                      (text_x - 10, text_y - 10, text_w + 20, text_h + 20))
     _screen.blit(text, (text_x, text_y))
+
+
+def start_new_game():
+    """Начало новой игры"""
+    global playing
+    pygame.time.set_timer(MOVE_ENEMY_EVENT, 0)
+    pygame.time.set_timer(UPDATE_HERO_EVENT, 0)
+    all_sprites.remove(*all_sprites.sprites())
+    ghosts.remove(*ghosts.sprites())
+    walls.remove(*walls.sprites())
+    points.remove(*points.sprites())
+    game.new(screen.get_size())
+    playing = True
+    pygame.time.set_timer(MOVE_ENEMY_EVENT, ENEMY_DELAY)
+    pygame.time.set_timer(UPDATE_HERO_EVENT, HERO_DELAY)
+
+
+def pause():
+    """Пауза - логика событий повторяет меню справки"""
+    pygame.time.set_timer(MOVE_ENEMY_EVENT, 0)
+    pygame.time.set_timer(UPDATE_HERO_EVENT, 0)
+    show_message(screen, 'Pause', pygame.Color(255, 255, 0))
+    while True:
+        for _event in pygame.event.get():
+            if _event.type == pygame.QUIT:
+                terminate()
+            elif _event.type == pygame.KEYDOWN or \
+                    _event.type == pygame.MOUSEBUTTONDOWN:
+                pygame.time.set_timer(MOVE_ENEMY_EVENT, ENEMY_DELAY)
+                pygame.time.set_timer(UPDATE_HERO_EVENT, HERO_DELAY)
+                return  # продолжаем игру
+        pygame.display.flip()
+        clock.tick(FPS)
 
 
 if __name__ == '__main__':
@@ -339,13 +410,16 @@ if __name__ == '__main__':
 
     start_screen()
 
-    game = Game(screen.get_size(), 'level1')
+    level = choice(LEVELS)
+    game = Game(screen.get_size())
 
     running = True
     playing = True
-    pygame.time.set_timer(MOVE_ENEMY_EVENT, ENEMY_DELAY)
-    pygame.time.set_timer(UPDATE_HERO_EVENT, HERO_DELAY)
+    start_new_game()
     while running:
+        if len(game.points) == 0:
+            playing = False
+            game_over(True)
         if playing and pygame.sprite.spritecollideany(game.hero, ghosts):
             playing = False
             game_over()
@@ -355,9 +429,18 @@ if __name__ == '__main__':
                     game.update_hero()
                 if event.type == MOVE_ENEMY_EVENT:
                     game.move_enemies()
+                if event.type == pygame.KEYUP:
+                    if event.key == pygame.K_p:
+                        pause()
+            else:
+                if event.type == pygame.KEYUP:
+                    if event.key == pygame.K_SPACE:
+                        start_new_game()
+            if event.type == pygame.KEYUP and event.key == pygame.K_h:
+                start_screen()
             if event.type == pygame.QUIT:
                 running = False
-        clock.tick(60)
+        clock.tick(FPS)
         if playing:
             screen.fill('black')
             all_sprites.update()
